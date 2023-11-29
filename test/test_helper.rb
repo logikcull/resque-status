@@ -1,63 +1,31 @@
-require 'bundler/setup'
-require 'resque-status'
+require "bundler/setup"
+require "resque-status"
 
-require 'minitest/autorun'
-require 'mocha/setup'
+require "minitest/autorun"
+require "mocha/setup"
 
-#
-# make sure we can run redis
-#
-
-if !system("which redis-server")
-  puts '', "** can't find `redis-server` in your path"
-  puts "** try running `sudo rake install`"
-  abort ''
-end
-
-#
-# start our own redis when the tests start,
-# kill it when they end
-#
-
-
-class << Minitest
-  def exit(*args)
-    pid = `ps -e -o pid,command | grep [r]edis.*9736`.split(" ")[0]
-    puts "Killing test redis server..."
-    Process.kill("KILL", pid.to_i)
-    super
-  end
-end
-
-dir = File.expand_path("../", __FILE__)
-puts "Starting redis for testing at localhost:9736..."
-result = `rm -f #{dir}/dump.rdb && redis-server #{dir}/redis-test.conf`
-raise "Redis failed to start: #{result}" unless $?.success?
-Resque.redis = 'localhost:9736/1'
+require "fakeredis"
+Resque.redis = Redis.new
 
 #### Fixtures
 
 class WorkingJob
-
   include Resque::Plugins::Status
 
   def perform
-    total = options['num']
+    total = options["num"]
     (1..total).each do |num|
       at(num, total, "At #{num}")
     end
   end
-
 end
 
 class ErrorJob
-
   include Resque::Plugins::Status
 
   def perform
     raise "I'm a bad little job"
   end
-
 end
 
 class KillableJob
@@ -70,7 +38,6 @@ class KillableJob
       at(num, 100, "At #{num} of 100")
     end
   end
-
 end
 
 class BasicJob

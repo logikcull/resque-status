@@ -1,20 +1,19 @@
-require 'securerandom'
+require "securerandom"
 
 module Resque
   module Plugins
     module Status
-
       # Resque::Plugins::Status::Hash is a Hash object that has helper methods for dealing with
       # the common status attributes. It also has a number of class methods for
       # creating/updating/retrieving status objects from Redis
       class Hash < ::Hash
-
         # Create a status, generating a new UUID, passing the message to the status
         # Returns the UUID of the new status.
         def self.create(uuid, *messages)
           set(uuid, *messages)
-          redis.zadd(set_key, Time.now.to_i, uuid)
-          redis.zremrangebyscore(set_key, 0, Time.now.to_i - @expire_in) if @expire_in
+          score = time_in_nanoseconds
+          redis.zadd(set_key, score, uuid)
+          redis.zremrangebyscore(set_key, 0, score - seconds_to_nanoseconds(@expire_in)) if @expire_in
           uuid
         end
 
@@ -27,7 +26,7 @@ module Resque
         # Get multiple statuses by UUID. Returns array of Resque::Plugins::Status::Hash
         def self.mget(uuids)
           return [] if uuids.empty?
-          status_keys = uuids.map{|u| status_key(u)}
+          status_keys = uuids.map { |u| status_key(u) }
           vals = redis.mget(*status_keys)
 
           uuids.zip(vals).map do |uuid, val|
@@ -100,12 +99,12 @@ module Resque
         def self.status_ids(range_start = nil, range_end = nil)
           if range_end && range_start
             # Because we want a reverse chronological order, we need to get a range starting
-            # by the higest negative number. The ordering is transparent from the API user's
+            # by the highest negative number. The ordering is transparent from the API user's
             # perspective so we need to convert the passed params
-            (redis.zrevrange(set_key, (range_start.abs), ((range_end || 1).abs)) || [])
+            (redis.zrevrange(set_key, range_start.abs, (range_end || 1).abs) || [])
           else
             # Because we want a reverse chronological order, we need to get a range starting
-            # by the higest negative number.
+            # by the highest negative number.
             redis.zrevrange(set_key, 0, -1) || []
           end
         end
@@ -115,12 +114,12 @@ module Resque
         # if it _should_ be killed by calling <tt>tick</tt> or <tt>at</tt>. If so, it raises
         # a <tt>Resque::Plugins::Status::Killed</tt> error and sets the status to 'killed'.
         def self.kill(uuid)
-          redis.sadd(kill_key, uuid)
+          redis.sadd?(kill_key, uuid)
         end
 
         # Remove the job at UUID from the kill list
         def self.killed(uuid)
-          redis.srem(kill_key, uuid)
+          redis.srem?(kill_key, uuid)
         end
 
         # Return the UUIDs of the jobs on the kill list
@@ -155,7 +154,7 @@ module Resque
 
         # Set the <tt>expire_in</tt> time in seconds
         def self.expire_in=(seconds)
-          @expire_in = seconds.nil? ? nil : seconds.to_i
+          @expire_in = seconds&.to_i
         end
 
         def self.status_key(uuid)
@@ -177,7 +176,7 @@ module Resque
         def self.hash_accessor(name, options = {})
           options[:default] ||= nil
           coerce = options[:coerce] ? ".#{options[:coerce]}" : ""
-          module_eval <<-EOT
+          module_eval <<-EOT, __FILE__, __LINE__ + 1
           def #{name}
             value = (self['#{name}'] ? self['#{name}']#{coerce} : #{options[:default].inspect})
             yield value if block_given?
@@ -192,6 +191,18 @@ module Resque
             !!self['#{name}']
           end
           EOT
+        end
+
+        # `zset` scores should be in nanoseconds since the epoch
+        # to enforce chronological ordering of statuses.
+        # Add the nanoseconds after converting the time to an integer
+        # to avoid floating point errors.
+        def self.time_in_nanoseconds(time = Time.now)
+          seconds_to_nanoseconds(time.to_i) + time.nsec
+        end
+
+        def self.seconds_to_nanoseconds(seconds)
+          seconds * (10**9)
         end
 
         # Proxy deprecated methods directly back to Resque itself.
@@ -218,15 +229,15 @@ module Resque
         def initialize(*args)
           super nil
           base_status = {
-            'time' => Time.now.to_i,
-            'status' => Resque::Plugins::Status::STATUS_QUEUED
+            "time" => Time.now.to_i,
+            "status" => Resque::Plugins::Status::STATUS_QUEUED
           }
-          base_status['uuid'] = args.shift if args.length > 1
+          base_status["uuid"] = args.shift if args.length > 1
           status_hash = args.inject(base_status) do |final, m|
-            m = {'message' => m} if m.is_a?(String)
+            m = {"message" => m} if m.is_a?(String)
             final.merge(m || {})
           end
-          self.replace(status_hash)
+          replace(status_hash)
         end
 
         # calculate the % completion of the job based on <tt>status</tt>, <tt>num</tt>
@@ -245,12 +256,12 @@ module Resque
         # Return the time of the status initialization. If set returns a <tt>Time</tt>
         # object, otherwise returns nil
         def time
-          time? ? Time.at(self['time']) : nil
+          time? ? Time.at(self["time"]) : nil
         end
 
         Resque::Plugins::Status::STATUSES.each do |status|
           define_method("#{status}?") do
-            self['status'] === status
+            self["status"] === status
           end
         end
 
@@ -268,15 +279,14 @@ module Resque
 
         # Return a JSON representation of the current object.
         def json
-          h = self.dup
-          h['pct_complete'] = pct_complete
+          h = dup
+          h["pct_complete"] = pct_complete
           self.class.encode(h)
         end
 
         def inspect
           "#<Resque::Plugins::Status::Hash #{super}>"
         end
-
       end
     end
   end
