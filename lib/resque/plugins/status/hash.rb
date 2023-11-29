@@ -176,7 +176,7 @@ module Resque
         def self.hash_accessor(name, options = {})
           options[:default] ||= nil
           coerce = options[:coerce] ? ".#{options[:coerce]}" : ""
-          module_eval <<-EOT
+          module_eval <<-EOT, __FILE__, __LINE__ + 1
           def #{name}
             value = (self['#{name}'] ? self['#{name}']#{coerce} : #{options[:default].inspect})
             yield value if block_given?
@@ -198,11 +198,11 @@ module Resque
         # Add the nanoseconds after converting the time to an integer
         # to avoid floating point errors.
         def self.time_in_nanoseconds(time = Time.now)
-          self.seconds_to_nanoseconds(time.to_i) + time.nsec
+          seconds_to_nanoseconds(time.to_i) + time.nsec
         end
 
         def self.seconds_to_nanoseconds(seconds)
-          seconds * (10 ** 9)
+          seconds * (10**9)
         end
 
         # Proxy deprecated methods directly back to Resque itself.
