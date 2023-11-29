@@ -176,7 +176,7 @@ module Resque
         def self.hash_accessor(name, options = {})
           options[:default] ||= nil
           coerce = options[:coerce] ? ".#{options[:coerce]}" : ""
-          module_eval <<-EOT, __FILE__, __LINE__ + 1
+          module_eval <<-EOT
           def #{name}
             value = (self['#{name}'] ? self['#{name}']#{coerce} : #{options[:default].inspect})
             yield value if block_given?
